@@ -1,14 +1,15 @@
 pub mod app_state;
 pub mod config;
 pub mod handlers;
+pub mod middleware;
 pub mod models;
 pub mod routes;
 pub mod utils;
 
-use axum::Router;
-use tower_http::cors::{Any, CorsLayer};
-use http::Method;
 use crate::app_state::AppState;
+use axum::Router;
+use http::Method;
+use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
 async fn main() {
@@ -27,11 +28,17 @@ async fn main() {
 
     let app = Router::new()
         .nest("/api/auth", routes::auth_routes::routes())
-        .route("/api/health", axum::routing::get(handlers::health_handler::health_check))
+        .nest("/api/users", routes::user_routes::routes())
+        .route(
+            "/api/health",
+            axum::routing::get(handlers::health_handler::health_check),
+        )
         .with_state(state)
         .layer(cors);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+        .await
+        .unwrap();
     tracing::info!("server running at http://localhost:8080");
     axum::serve(listener, app).await.unwrap();
 }

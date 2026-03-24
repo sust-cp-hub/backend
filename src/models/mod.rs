@@ -1,7 +1,7 @@
-pub mod user;
-pub mod contest;
 pub mod announcement;
+pub mod contest;
+pub mod user;
 
-pub use user::*;
-pub use contest::*;
 pub use announcement::*;
+pub use contest::*;
+pub use user::*;

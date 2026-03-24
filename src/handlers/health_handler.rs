@@ -1,6 +1,6 @@
+use crate::app_state::AppState;
 use axum::{extract::State, Json};
 use serde_json::{json, Value};
-use crate::app_state::AppState;
 
 // health check which verifies server + db are alive
 pub async fn health_check(State(state): State<AppState>) -> Json<Value> {
