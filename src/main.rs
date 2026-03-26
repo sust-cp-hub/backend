@@ -29,6 +29,7 @@ async fn main() {
     let app = Router::new()
         .nest("/api/auth", routes::auth_routes::routes())
         .nest("/api/users", routes::user_routes::routes())
+        .nest("/api/admin", routes::admin_routes::routes())
         .route(
             "/api/health",
             axum::routing::get(handlers::health_handler::health_check),
