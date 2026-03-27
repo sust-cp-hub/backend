@@ -1,4 +1,4 @@
-# SUST CP HUB Backend
+# SUST CP Geeks Backend
 
 REST API backend for the SUST Competitive Programming Community Platform.
 
