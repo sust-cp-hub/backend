@@ -1,47 +1,51 @@
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use axum::{extract::State, Json};
+use axum::{extract::State, http::StatusCode, Json};
 use serde_json::{json, Value};
 
 use crate::app_state::AppState;
+use crate::errors::AppError;
 use crate::models::user::{LoginInput, RegisterInput, User};
 use crate::utils::jwt::create_token;
+use crate::validation::{validate_email, validate_string};
 
 pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterInput>,
-) -> Json<Value> {
-    // checking if the email is already in the db
+) -> Result<(StatusCode, Json<Value>), AppError> {
+    // validate inputs upfront
+    validate_string(&body.name, "Name", 2, 100)?;
+    validate_string(&body.reg_number, "Registration number", 5, 50)?;
+    validate_string(&body.password, "Password", 6, 255)?;
+    validate_email(&body.email)?;
+
+    // check if email already exists
     let existing = sqlx::query_scalar::<_, i32>("SELECT user_id FROM users WHERE email = $1")
         .bind(&body.email)
         .fetch_optional(&state.pool)
-        .await;
+        .await?;
 
-    if let Ok(Some(_)) = existing {
-        return Json(json!({
-            "success": false,
-            "error": "email already registered"
-        }));
+    if existing.is_some() {
+        return Err(AppError::Conflict("Email already registered".to_string()));
     }
 
-    // hashing password with argon2
+    // hash password with argon2
     let salt = SaltString::generate(&mut OsRng);
     let hashed = Argon2::default()
         .hash_password(body.password.as_bytes(), &salt)
-        .expect("failed to hash password")
+        .map_err(|e| AppError::InternalError(format!("Failed to hash password: {}", e)))?
         .to_string();
 
-    // automatically activate only sust students, others will be approved later by admin
+    // auto-activate sust students, others pending
     let status = if body.email.ends_with("@student.sust.edu") {
         "active"
     } else {
         "pending"
     };
 
-    // saving the new user to neon postgres
-    let result = sqlx::query_scalar::<_, i32>(
-        "INSERT INTO users (reg_number, name, email, password, status) VALUES ($1, $2, $3, $4, $5) RETURNING user_id"
+    let user_id = sqlx::query_scalar::<_, i32>(
+        "INSERT INTO users (reg_number, name, email, password, status) VALUES ($1, $2, $3, $4, $5) RETURNING user_id",
     )
     .bind(&body.reg_number)
     .bind(&body.name)
@@ -49,10 +53,11 @@ pub async fn register(
     .bind(&hashed)
     .bind(status)
     .fetch_one(&state.pool)
-    .await;
+    .await?;
 
-    match result {
-        Ok(user_id) => Json(json!({
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
             "success": true,
             "user_id": user_id,
             "status": status,
@@ -62,83 +67,57 @@ pub async fn register(
                 "registered — pending for admin approval"
             }
         })),
-        Err(e) => {
-            tracing::error!("registration failed: {}", e);
-            Json(json!({
-                "success": false,
-                "error": "registration failed — email or reg number may already exist"
-            }))
-        }
-    }
+    ))
 }
 
-pub async fn login(State(state): State<AppState>, Json(body): Json<LoginInput>) -> Json<Value> {
-    // find user by email
+pub async fn login(
+    State(state): State<AppState>,
+    Json(body): Json<LoginInput>,
+) -> Result<Json<Value>, AppError> {
+    // find user by email — use vague error to prevent user enumeration
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&body.email)
         .fetch_optional(&state.pool)
-        .await;
+        .await?;
 
-    let user = match user {
-        Ok(Some(u)) => u,
-        _ => {
-            return Json(json!({
-                "success": false,
-                "error": "invalid email or password"
-            }))
-        }
-    };
+    let user = user.ok_or(AppError::Unauthorized(
+        "Invalid email or password".to_string(),
+    ))?;
 
+    // check account status
     match user.status.as_deref() {
         Some("pending") => {
-            return Json(json!({
-                "success": false,
-                "error": "account pending approval"
-            }))
+            return Err(AppError::Unauthorized(
+                "Account pending approval".to_string(),
+            ))
         }
         Some("rejected") => {
-            return Json(json!({
-                "success": false,
-                "error": "account has been rejected"
-            }))
+            return Err(AppError::Unauthorized(
+                "Account has been rejected".to_string(),
+            ))
         }
         _ => {}
     }
 
-    // verify the provided password against hashed password
-    let parsed_hash = match PasswordHash::new(&user.password) {
-        Ok(h) => h,
-        Err(_) => {
-            return Json(json!({
-                "success": false,
-                "error": "invalid email or password"
-            }))
-        }
-    };
+    // verify password
+    let parsed_hash = PasswordHash::new(&user.password)
+        .map_err(|_| AppError::Unauthorized("Invalid email or password".to_string()))?;
 
     let is_valid = Argon2::default()
         .verify_password(body.password.as_bytes(), &parsed_hash)
         .is_ok();
 
     if !is_valid {
-        return Json(json!({
-            "success": false,
-            "error": "invalid email or password"
-        }));
+        return Err(AppError::Unauthorized(
+            "Invalid email or password".to_string(),
+        ));
     }
 
-    // if valid, generate jwt token
-    let token = match create_token(user.user_id, &user.email, user.is_admin.unwrap_or(false)) {
-        Ok(t) => t,
-        Err(e) => {
-            return Json(json!({
-                "success": false,
-                "error": e
-            }))
-        }
-    };
+    // generate jwt token
+    let token = create_token(user.user_id, &user.email, user.is_admin.unwrap_or(false))
+        .map_err(|e| AppError::InternalError(e))?;
 
-    return Json(json!({
+    Ok(Json(json!({
         "success": true,
         "token": token,
         "user": {
@@ -147,5 +126,5 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginInput>) 
             "email": user.email,
             "is_admin": user.is_admin
         }
-    }));
+    })))
 }

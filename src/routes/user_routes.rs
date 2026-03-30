@@ -3,5 +3,5 @@ use crate::handlers::user_handler;
 use axum::{routing::get, Router};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/me", get(user_handler::get_me))
+    Router::new().route("/me", get(user_handler::get_me).put(user_handler::update_me))
 }

@@ -1,10 +1,12 @@
 pub mod app_state;
 pub mod config;
+pub mod errors;
 pub mod handlers;
 pub mod middleware;
 pub mod models;
 pub mod routes;
 pub mod utils;
+pub mod validation;
 
 use crate::app_state::AppState;
 use axum::Router;
@@ -30,6 +32,8 @@ async fn main() {
         .nest("/api/auth", routes::auth_routes::routes())
         .nest("/api/users", routes::user_routes::routes())
         .nest("/api/admin", routes::admin_routes::routes())
+        .nest("/api/contests", routes::contest_routes::routes())
+        .nest("/api/announcements", routes::announcement_routes::routes())
         .route(
             "/api/health",
             axum::routing::get(handlers::health_handler::health_check),
