@@ -35,6 +35,7 @@ async fn main() {
         .nest("/api/admin", routes::admin_routes::routes())
         .nest("/api/contests", routes::contest_routes::routes())
         .nest("/api/announcements", routes::announcement_routes::routes())
+        .nest("/api/events", routes::event_routes::routes())
         .route(
             "/api/health",
             axum::routing::get(handlers::health_handler::health_check),

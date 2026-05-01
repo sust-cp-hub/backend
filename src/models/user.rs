@@ -12,6 +12,7 @@ pub struct User {
     pub vjudge_handle: Option<String>,
     pub codeforces_handle: Option<String>,
     pub is_admin: Option<bool>,
+    pub is_manager: Option<bool>,
     pub status: Option<String>,
     pub id_card_path: Option<String>,
 }

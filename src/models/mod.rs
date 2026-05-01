@@ -1,4 +1,5 @@
 pub mod announcement;
+pub mod event;
 pub mod contest;
 pub mod user;
 

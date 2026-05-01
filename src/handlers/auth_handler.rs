@@ -114,8 +114,13 @@ pub async fn login(
     }
 
     // generate jwt token
-    let token = create_token(user.user_id, &user.email, user.is_admin.unwrap_or(false))
-        .map_err(|e| AppError::InternalError(e))?;
+    let token = create_token(
+        user.user_id,
+        &user.email,
+        user.is_admin.unwrap_or(false),
+        user.is_manager.unwrap_or(false),
+    )
+    .map_err(|e| AppError::InternalError(e))?;
 
     Ok(Json(json!({
         "success": true,
@@ -124,7 +129,8 @@ pub async fn login(
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,
-            "is_admin": user.is_admin
+            "is_admin": user.is_admin,
+            "is_manager": user.is_manager
         }
     })))
 }
