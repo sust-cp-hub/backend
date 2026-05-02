@@ -2,13 +2,27 @@ use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum::{extract::State, http::StatusCode, Json};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::app_state::AppState;
 use crate::errors::AppError;
 use crate::models::user::{LoginInput, RegisterInput, User};
+use crate::services::email;
 use crate::utils::jwt::create_token;
+use crate::utils::otp;
 use crate::validation::{validate_email, validate_string};
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyOtpInput {
+    pub email: String,
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResendOtpInput {
+    pub email: String,
+}
 
 pub async fn register(
     State(state): State<AppState>,
@@ -37,13 +51,7 @@ pub async fn register(
         .map_err(|e| AppError::InternalError(format!("Failed to hash password: {}", e)))?
         .to_string();
 
-    // auto-activate sust students, others pending
-    let status = if body.email.ends_with("@student.sust.edu") {
-        "active"
-    } else {
-        "pending"
-    };
-
+    // all new registrations start as pending_verification until otp is confirmed
     let user_id = sqlx::query_scalar::<_, i32>(
         "INSERT INTO users (reg_number, name, email, password, status) VALUES ($1, $2, $3, $4, $5) RETURNING user_id",
     )
@@ -51,23 +59,107 @@ pub async fn register(
     .bind(&body.name)
     .bind(&body.email)
     .bind(&hashed)
-    .bind(status)
+    .bind("pending_verification")
     .fetch_one(&state.pool)
     .await?;
+
+    // generate and send otp
+    let code = otp::generate_otp();
+    otp::store_otp(&state.pool, &body.email, &code).await?;
+    email::send_otp_email(&body.email, &code).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(json!({
             "success": true,
             "user_id": user_id,
-            "status": status,
-            "message": if status == "active" {
-                "registered successfully"
-            } else {
-                "registered — pending for admin approval"
-            }
+            "status": "pending_verification",
+            "message": "Registered — check your email for the verification code"
         })),
     ))
+}
+
+// verify the otp code sent to the user's email
+pub async fn verify_otp_handler(
+    State(state): State<AppState>,
+    Json(body): Json<VerifyOtpInput>,
+) -> Result<Json<Value>, AppError> {
+    validate_email(&body.email)?;
+    validate_string(&body.code, "OTP code", 6, 6)?;
+
+    let is_valid = otp::verify_otp(&state.pool, &body.email, &body.code).await?;
+
+    if !is_valid {
+        return Err(AppError::BadRequest(
+            "Invalid or expired verification code".to_string(),
+        ));
+    }
+
+    // otp is valid — transition user status
+    // sust students go straight to active, others need admin approval
+    let new_status = if body.email.ends_with("@student.sust.edu") {
+        "active"
+    } else {
+        "pending"
+    };
+
+    sqlx::query("UPDATE users SET status = $1 WHERE email = $2")
+        .bind(new_status)
+        .bind(&body.email)
+        .execute(&state.pool)
+        .await?;
+
+    let message = if new_status == "active" {
+        "Email verified — you can now log in"
+    } else {
+        "Email verified — your account is pending admin approval"
+    };
+
+    Ok(Json(json!({
+        "success": true,
+        "status": new_status,
+        "message": message
+    })))
+}
+
+// resend the otp code if the user didn't receive it
+pub async fn resend_otp_handler(
+    State(state): State<AppState>,
+    Json(body): Json<ResendOtpInput>,
+) -> Result<Json<Value>, AppError> {
+    validate_email(&body.email)?;
+
+    // make sure the user exists and is still pending verification
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM users WHERE email = $1",
+    )
+    .bind(&body.email)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    match status.as_deref() {
+        Some("pending_verification") => {
+            // good — they need a new code
+        }
+        Some(_) => {
+            return Err(AppError::BadRequest(
+                "This account has already been verified".to_string(),
+            ));
+        }
+        None => {
+            return Err(AppError::NotFound("No account found with this email".to_string()));
+        }
+    }
+
+    // generate and send a fresh otp (old ones get invalidated inside store_otp)
+    let code = otp::generate_otp();
+    otp::store_otp(&state.pool, &body.email, &code).await?;
+    email::send_otp_email(&body.email, &code).await?;
+
+    Ok(Json(json!({
+        "success": true,
+        "message": "New verification code sent — check your email"
+    })))
 }
 
 pub async fn login(
@@ -86,9 +178,14 @@ pub async fn login(
 
     // check account status
     match user.status.as_deref() {
+        Some("pending_verification") => {
+            return Err(AppError::Unauthorized(
+                "Please verify your email first — check your inbox for the code".to_string(),
+            ))
+        }
         Some("pending") => {
             return Err(AppError::Unauthorized(
-                "Account pending approval".to_string(),
+                "Account pending admin approval".to_string(),
             ))
         }
         Some("rejected") => {
@@ -114,7 +211,7 @@ pub async fn login(
     }
 
     // generate jwt token
-    let token = create_token(user.user_id, &user.email, user.is_admin.unwrap_or(false))
+    let token = create_token(user.user_id, &user.email, user.is_admin.unwrap_or(false), user.is_manager.unwrap_or(false))
         .map_err(|e| AppError::InternalError(e))?;
 
     Ok(Json(json!({
@@ -124,7 +221,8 @@ pub async fn login(
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,
-            "is_admin": user.is_admin
+            "is_admin": user.is_admin,
+            "is_manager": user.is_manager
         }
     })))
 }

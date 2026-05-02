@@ -34,3 +34,9 @@ http = "1"
 # Logging
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+# Email (Resend API)
+resend-rs = "0.25"
+
+# Random number generation (OTP codes)
+rand = "0.8"
