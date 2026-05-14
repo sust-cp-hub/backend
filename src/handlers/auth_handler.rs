@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::app_state::AppState;
 use crate::errors::AppError;
 use crate::models::user::{LoginInput, RegisterInput, User};
-use crate::services::email;
+use crate::services::{codeforces, email};
 use crate::utils::jwt::create_token;
 use crate::utils::otp;
 use crate::validation::{validate_email, validate_string};
@@ -33,6 +33,10 @@ pub async fn register(
     validate_string(&body.reg_number, "Registration number", 5, 50)?;
     validate_string(&body.password, "Password", 6, 255)?;
     validate_email(&body.email)?;
+    validate_string(&body.codeforces_handle, "Codeforces handle", 1, 50)?;
+
+    // validate the codeforces handle exists on codeforces.com
+    codeforces::validate_handle(&body.codeforces_handle).await?;
 
     // check if email already exists
     let existing = sqlx::query_scalar::<_, i32>("SELECT user_id FROM users WHERE email = $1")
@@ -53,13 +57,14 @@ pub async fn register(
 
     // all new registrations start as pending_verification until otp is confirmed
     let user_id = sqlx::query_scalar::<_, i32>(
-        "INSERT INTO users (reg_number, name, email, password, status) VALUES ($1, $2, $3, $4, $5) RETURNING user_id",
+        "INSERT INTO users (reg_number, name, email, password, status, codeforces_handle) VALUES ($1, $2, $3, $4, $5, $6) RETURNING user_id",
     )
     .bind(&body.reg_number)
     .bind(&body.name)
     .bind(&body.email)
     .bind(&hashed)
     .bind("pending_verification")
+    .bind(&body.codeforces_handle)
     .fetch_one(&state.pool)
     .await?;
 
