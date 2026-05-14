@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use crate::app_state::AppState;
 use crate::errors::AppError;
 use crate::models::user::{UpdateProfile, User};
+use crate::services::codeforces;
 use crate::utils::jwt::Claims;
 
 // get my profile
@@ -44,7 +45,11 @@ pub async fn update_me(
         None => existing.vjudge_handle,
     };
     let new_codeforces = match body.codeforces_handle {
-        Some(handle) => Some(handle),
+        Some(handle) => {
+            // validate the new handle exists on codeforces.com
+            codeforces::validate_handle(&handle).await?;
+            Some(handle)
+        }
         None => existing.codeforces_handle,
     };
 

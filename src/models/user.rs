@@ -23,6 +23,7 @@ pub struct RegisterInput {
     pub name: String,
     pub email: String,
     pub password: String,
+    pub codeforces_handle: String,
 }
 
 #[derive(Debug, Deserialize)]
