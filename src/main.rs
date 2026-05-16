@@ -21,7 +21,10 @@ async fn main() {
 
     // db pool for neon postgres
     let pool = config::database::connect().await;
-    let state = AppState { pool };
+    let state = AppState {
+        pool,
+        results_cache: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+    };
 
     // cors setup for frontend
     let cors = CorsLayer::new()
@@ -37,6 +40,7 @@ async fn main() {
         .nest("/api/announcements", routes::announcement_routes::routes())
         .nest("/api/events", routes::event_routes::routes())
         .nest("/api/cf", routes::codeforces_routes::routes())
+        .nest("/api/ranker", routes::ranker_routes::routes())
         .route(
             "/api/health",
             axum::routing::get(handlers::health_handler::health_check),

@@ -43,3 +43,12 @@ rand = "0.8"
 
 # HTTP client (Codeforces API)
 reqwest = { version = "0.12", features = ["json"] }
+
+# PDF generation (ranker results)
+genpdf = "0.2"
+
+# UUID (session IDs for PDF downloads)
+uuid = { version = "1", features = ["v4"] }
+
+# Async utilities (try_join_all for parallel fetching)
+futures = "0.3"
