@@ -5,4 +5,5 @@ pub mod codeforces_handler;
 pub mod contest_handler;
 pub mod event_handler;
 pub mod health_handler;
+pub mod ranker_handler;
 pub mod user_handler;
