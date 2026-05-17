@@ -63,6 +63,7 @@ The server starts at **`http://localhost:8080`**
 | Auth | `register`, `verify-otp`, `resend-otp`, `login` | Public |
 | Profile | `get_me`, `update_me` | User |
 | Codeforces | `profile/{id}`, `leaderboard` | User |
+| VJudge Ranker | `analyze`, `pdf/{session_id}` | Public |
 | Contests | CRUD (5 endpoints) | User / Admin |
 | Announcements | CRUD (5 endpoints) | User / Admin |
 | Events + Teams | CRUD (8 endpoints) | User / Admin / Manager |
@@ -76,7 +77,7 @@ The server starts at **`http://localhost:8080`**
 ```
 src/
 ├── main.rs                      # entry point, router assembly, cors
-├── app_state.rs                 # shared application state (db pool)
+├── app_state.rs                 # shared application state (db pool + results cache)
 ├── errors.rs                    # unified AppError enum + IntoResponse
 ├── validation.rs                # input validation helpers
 ├── config/
@@ -86,7 +87,8 @@ src/
 │   ├── contest.rs               # Contest, CreateContest, UpdateContest
 │   ├── announcement.rs          # Announcement, CreateAnnouncement
 │   ├── event.rs                 # Event, Team, TeamMember
-│   └── codeforces.rs            # CF API types, ProfileStats, Leaderboard
+│   ├── codeforces.rs            # CF API types, ProfileStats, Leaderboard
+│   └── ranker.rs                # VJudge contest types, RankerRequest/Response
 ├── handlers/
 │   ├── auth_handler.rs          # register, login, OTP verification
 │   ├── user_handler.rs          # profile management
@@ -95,10 +97,13 @@ src/
 │   ├── announcement_handler.rs  # announcement CRUD
 │   ├── event_handler.rs         # event + team CRUD
 │   ├── codeforces_handler.rs    # CF profile stats, leaderboard
+│   ├── ranker_handler.rs        # VJudge ranker + PDF download
 │   └── health_handler.rs        # health check
 ├── services/
 │   ├── email.rs                 # OTP email via Resend API
-│   └── codeforces.rs            # CF API client (validate, fetch, aggregate)
+│   ├── codeforces.rs            # CF API client (validate, fetch, aggregate)
+│   ├── vjudge.rs                # VJudge contest data fetcher
+│   └── ranker.rs                # ICPC ranking algorithm + multi-contest merge
 ├── middleware/
 │   └── auth_middleware.rs       # JWT claims extractor
 ├── routes/                      # route definitions per resource
